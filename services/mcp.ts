@@ -63,6 +63,32 @@ class LocalMcpRegistry {
           },
         },
         {
+          name: "get_stock_price",
+          description: "Get the current stock price for a given ticker symbol",
+          parameters: {
+            type: 'OBJECT',
+            properties: {
+              symbol: {
+                type: 'STRING',
+                description: "The stock ticker symbol (e.g. GOOG, AAPL, MSFT)",
+              },
+            },
+            required: ['symbol'],
+          },
+          execute: async ({ symbol }: { symbol: string }) => {
+             // Mock stock data
+             const price = (Math.random() * 500 + 50).toFixed(2);
+             const change = (Math.random() * 10 - 5).toFixed(2);
+             return {
+               symbol: symbol.toUpperCase(),
+               price: `$${price}`,
+               currency: 'USD',
+               change_percent: `${change}%`,
+               last_updated: new Date().toISOString()
+             };
+          },
+        },
+        {
           name: "roll_dice",
           description: "Roll a standard d6 die",
           parameters: {
