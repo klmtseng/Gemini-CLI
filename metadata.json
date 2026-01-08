@@ -1,0 +1,5 @@
+{
+  "name": "Gemini CLI",
+  "description": "A robust, web-based command-line interface for interacting with Google's Gemini models, featuring streaming responses, history management, and slash commands.",
+  "requestFramePermissions": []
+}
