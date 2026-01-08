@@ -39,15 +39,8 @@ const App: React.FC = () => {
       <div className="w-full h-full max-w-5xl bg-terminal-bg border border-gray-700 rounded-lg shadow-2xl overflow-hidden flex flex-col relative">
         
         {/* Tab Bar Header */}
-        <div className="flex items-center bg-[#161b22] border-b border-gray-700 select-none overflow-x-auto no-scrollbar">
+        <div className="flex items-center bg-[#161b22] border-b border-gray-700 select-none overflow-x-auto no-scrollbar pl-2">
           
-          {/* Mac-like Traffic Lights (Visual Decoration) */}
-          <div className="flex items-center space-x-2 px-4 py-3 border-r border-gray-800 mr-1 shrink-0">
-             <div className="w-3 h-3 bg-red-500 rounded-full"></div>
-             <div className="w-3 h-3 bg-yellow-500 rounded-full"></div>
-             <div className="w-3 h-3 bg-green-500 rounded-full"></div>
-          </div>
-
           {/* Tabs Container */}
           <div className="flex flex-1 items-end h-full">
             {tabs.map((tab) => {
