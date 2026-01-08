@@ -5,7 +5,11 @@ import { INITIAL_WELCOME_MESSAGE, DEFAULT_MODEL } from '../constants';
 import { geminiService } from '../services/geminiService';
 import MessageItem from './MessageItem';
 
-const Terminal: React.FC = () => {
+interface TerminalProps {
+  isVisible?: boolean;
+}
+
+const Terminal: React.FC<TerminalProps> = ({ isVisible = true }) => {
   // State
   const [messages, setMessages] = useState<TerminalMessage[]>([
     {
@@ -24,18 +28,25 @@ const Terminal: React.FC = () => {
   });
   const [historyIndex, setHistoryIndex] = useState(-1);
   const [commandHistory, setCommandHistory] = useState<string[]>([]);
+  const [userScrolledUp, setUserScrolledUp] = useState(false);
 
   // Refs
-  const bottomRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
 
   // Auto-scroll effect
+  // We monitor isVisible to ensure we snap to bottom when user switches back to this tab
   useEffect(() => {
-    if (bottomRef.current) {
-      bottomRef.current.scrollIntoView({ behavior: 'smooth' });
+    if (isVisible && !userScrolledUp && scrollContainerRef.current) {
+      // Use direct scrollTop manipulation for instant, jitter-free terminal scrolling
+      // Using requestAnimationFrame helps ensure layout is computed after display:none removal
+      requestAnimationFrame(() => {
+        if (scrollContainerRef.current) {
+          scrollContainerRef.current.scrollTop = scrollContainerRef.current.scrollHeight;
+        }
+      });
     }
-  }, [messages, isProcessing]);
+  }, [messages, isProcessing, userScrolledUp, isVisible]);
 
   // Focus input on click anywhere
   const handleContainerClick = () => {
@@ -45,6 +56,22 @@ const Terminal: React.FC = () => {
       inputRef.current?.focus();
     }
   };
+
+  // Auto-focus when tab becomes visible
+  useEffect(() => {
+    if (isVisible && !isProcessing) {
+      inputRef.current?.focus();
+    }
+  }, [isVisible, isProcessing]);
+
+  const handleScroll = useCallback(() => {
+    if (scrollContainerRef.current && isVisible) {
+      const { scrollTop, scrollHeight, clientHeight } = scrollContainerRef.current;
+      // If user is further than 50px from the bottom, consider them "scrolled up"
+      const isAtBottom = scrollHeight - scrollTop - clientHeight < 50;
+      setUserScrolledUp(!isAtBottom);
+    }
+  }, [isVisible]);
 
   const addMessage = useCallback((type: MessageType, content: string) => {
     setMessages((prev) => [
@@ -128,6 +155,9 @@ const Terminal: React.FC = () => {
     const prompt = input.trim();
     if (!prompt || isProcessing) return;
 
+    // Reset scroll lock so view snaps to bottom for new message
+    setUserScrolledUp(false);
+
     // Add to command history
     setCommandHistory(prev => [prompt, ...prev]);
     setHistoryIndex(-1);
@@ -179,19 +209,6 @@ const Terminal: React.FC = () => {
           updateLastMessage(currentText);
         },
         (toolName, args) => {
-           // Log tool execution in UI before the message updates
-           // We insert it *before* the current assistant message which is being streamed
-           // Actually, standard terminals log linearly. Let's just create a log entry.
-           // However, react state updates are async. To keep it simple, we won't inject *into* the past history array easily
-           // without causing jumps. 
-           // We will rely on a new message type added to the end, but since the Assistant message is already "open" at the end,
-           // we might want to display tool usage differently.
-           // For now: We won't disrupt the message flow in UI state to avoid complexity, 
-           // but we could overlay a status or toast.
-           // ALTERNATIVE: Append a "Tool Log" message, then append a NEW "Assistant" message for the rest of the stream?
-           // No, that breaks the single "turn" illusion.
-           // Let's just console log for now, or append to the current text if we want to show it inline?
-           // Better: Add a message item!
            setMessages(prev => {
              // Find the last assistant message (placeholder)
              const msgs = [...prev];
@@ -215,8 +232,10 @@ const Terminal: React.FC = () => {
       updateLastMessage(`Error: ${error.message}`);
     } finally {
       setIsProcessing(false);
-      // Ensure focus returns to input after generation
-      setTimeout(() => inputRef.current?.focus(), 10);
+      // Ensure focus returns to input after generation if visible
+      if (isVisible) {
+          setTimeout(() => inputRef.current?.focus(), 10);
+      }
     }
   };
 
@@ -243,22 +262,32 @@ const Terminal: React.FC = () => {
       e.preventDefault();
       setInput('');
       addMessage(MessageType.SYSTEM, '^C');
+    } else if (e.key === 'PageUp') {
+      e.preventDefault();
+      if (scrollContainerRef.current) {
+        scrollContainerRef.current.scrollTop -= scrollContainerRef.current.clientHeight;
+      }
+    } else if (e.key === 'PageDown') {
+      e.preventDefault();
+      if (scrollContainerRef.current) {
+        scrollContainerRef.current.scrollTop += scrollContainerRef.current.clientHeight;
+      }
     }
   };
 
   return (
     <div 
-      className="h-full w-full flex flex-col font-mono text-sm sm:text-base overflow-hidden"
+      className="h-full w-full flex flex-col font-mono text-sm sm:text-base overflow-hidden bg-terminal-bg"
       onClick={handleContainerClick}
     >
       <div 
         ref={scrollContainerRef}
+        onScroll={handleScroll}
         className="flex-1 overflow-y-auto p-4 space-y-1"
       >
         {messages.map((msg) => (
           <MessageItem key={msg.id} message={msg} />
         ))}
-        <div ref={bottomRef} />
       </div>
 
       <div className="p-4 bg-terminal-bg border-t border-gray-800 shrink-0">
