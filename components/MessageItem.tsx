@@ -40,6 +40,15 @@ const MessageItem: React.FC<MessageItemProps> = ({ message }) => {
     );
   }
 
+  if (type === MessageType.TOOL_LOG) {
+    return (
+      <div className="mb-1 break-words text-gray-500 text-xs font-mono pl-4 border-l-2 border-gray-700">
+        <span className="mr-2">⚡</span>
+        <span>{content}</span>
+      </div>
+    );
+  }
+
   // Assistant Message
   return (
     <div className="mb-4 break-words">
@@ -47,7 +56,6 @@ const MessageItem: React.FC<MessageItemProps> = ({ message }) => {
         <span className="text-terminal-gray mr-2 mt-[2px] select-none">[{timeString}]</span>
         <span className="text-terminal-green font-bold mr-2 mt-[2px] select-none">gemini</span>
         <span className="text-terminal-text font-mono whitespace-pre-wrap leading-relaxed flex-1">
-            {/* We use basic pre-wrap for authentic terminal feel, could enhance with react-markdown if desired */}
             {content}
         </span>
       </div>

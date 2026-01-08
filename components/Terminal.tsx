@@ -20,6 +20,7 @@ const Terminal: React.FC = () => {
   const [config, setConfig] = useState<TerminalConfig>({
     model: DEFAULT_MODEL,
     systemInstruction: undefined,
+    enableMcp: true, // Default to true for demo
   });
   const [historyIndex, setHistoryIndex] = useState(-1);
   const [commandHistory, setCommandHistory] = useState<string[]>([]);
@@ -61,10 +62,14 @@ const Terminal: React.FC = () => {
     setMessages((prev) => {
       const newMessages = [...prev];
       if (newMessages.length > 0) {
-        newMessages[newMessages.length - 1] = {
-          ...newMessages[newMessages.length - 1],
-          content: content,
-        };
+        const lastMsg = newMessages[newMessages.length - 1];
+        // Only update if it's an assistant message
+        if (lastMsg.type === MessageType.ASSISTANT) {
+           newMessages[newMessages.length - 1] = {
+            ...lastMsg,
+            content: content,
+          };
+        }
       }
       return newMessages;
     });
@@ -101,6 +106,16 @@ const Terminal: React.FC = () => {
            const instruction = args.join(' ');
            setConfig(prev => ({ ...prev, systemInstruction: instruction }));
            addMessage(MessageType.SYSTEM, `System instruction updated.`);
+        }
+        break;
+      case 'mcp':
+        if (args[0] === 'status') {
+          addMessage(MessageType.SYSTEM, `MCP Enabled: ${config.enableMcp}\nRegistered Server: standard-utils`);
+        } else if (args[0] === 'toggle') {
+          setConfig(prev => ({...prev, enableMcp: !prev.enableMcp}));
+          addMessage(MessageType.SYSTEM, `MCP ${!config.enableMcp ? 'Enabled' : 'Disabled'}`);
+        } else {
+          addMessage(MessageType.SYSTEM, `Usage: /mcp [status|toggle]`);
         }
         break;
       default:
@@ -141,7 +156,7 @@ const Terminal: React.FC = () => {
 
     try {
       // Prepare history for API
-      // Filter out system/error messages and map to API format
+      // Filter out system/error/log messages and map to API format
       const apiHistory = messages
         .filter(m => m.type === MessageType.USER || m.type === MessageType.ASSISTANT)
         // Simple mapping: if previous was empty (the placeholder we just added), ignore it for now
@@ -158,16 +173,46 @@ const Terminal: React.FC = () => {
         prompt,
         apiHistory,
         config.systemInstruction,
+        config.enableMcp,
         (chunk) => {
           currentText += chunk;
           updateLastMessage(currentText);
+        },
+        (toolName, args) => {
+           // Log tool execution in UI before the message updates
+           // We insert it *before* the current assistant message which is being streamed
+           // Actually, standard terminals log linearly. Let's just create a log entry.
+           // However, react state updates are async. To keep it simple, we won't inject *into* the past history array easily
+           // without causing jumps. 
+           // We will rely on a new message type added to the end, but since the Assistant message is already "open" at the end,
+           // we might want to display tool usage differently.
+           // For now: We won't disrupt the message flow in UI state to avoid complexity, 
+           // but we could overlay a status or toast.
+           // ALTERNATIVE: Append a "Tool Log" message, then append a NEW "Assistant" message for the rest of the stream?
+           // No, that breaks the single "turn" illusion.
+           // Let's just console log for now, or append to the current text if we want to show it inline?
+           // Better: Add a message item!
+           setMessages(prev => {
+             // Find the last assistant message (placeholder)
+             const msgs = [...prev];
+             // Insert tool log before the last message
+             const last = msgs.pop();
+             if (last) {
+                msgs.push({
+                  id: uuidv4(),
+                  type: MessageType.TOOL_LOG,
+                  content: `Executing ${toolName}(${JSON.stringify(args)})`,
+                  timestamp: Date.now()
+                });
+                msgs.push(last);
+             }
+             return msgs;
+           });
         }
       );
 
     } catch (error: any) {
       updateLastMessage(`Error: ${error.message}`);
-      // Change the type of the last message to error if possible, or just append error text
-      // For simplicity in this structure, we just show the error in the assistant block
     } finally {
       setIsProcessing(false);
       // Ensure focus returns to input after generation
