@@ -1,8 +1,13 @@
-import { GoogleGenAI } from "@google/genai";
+import { GoogleGenAI, Chat } from "@google/genai";
 import { GeminiModel } from '../types';
+import { mcpRegistry } from './mcp';
 
 interface StreamResponseCallback {
   (chunkText: string): void;
+}
+
+interface ToolExecutionCallback {
+  (toolName: string, args: any): void;
 }
 
 export class GeminiService {
@@ -15,7 +20,6 @@ export class GeminiService {
       this.ai = new GoogleGenAI({ apiKey: this.apiKey });
     } else {
       console.error("API_KEY is missing from environment variables.");
-      // Fallback instance to prevent crash, though calls will fail
       this.ai = new GoogleGenAI({ apiKey: 'MISSING_KEY' });
     }
   }
@@ -23,16 +27,17 @@ export class GeminiService {
   public async streamChat(
     model: GeminiModel,
     prompt: string,
-    history: { role: string; parts: { text: string }[] }[],
+    history: { role: string; parts: any[] }[],
     systemInstruction: string | undefined,
-    onChunk: StreamResponseCallback
+    enableMcp: boolean,
+    onChunk: StreamResponseCallback,
+    onToolStart: ToolExecutionCallback
   ): Promise<string> {
     if (!this.apiKey) {
       throw new Error("API Key is missing. Please check your configuration.");
     }
 
     try {
-      // Determine model name and configuration based on internal enum
       let modelName = 'gemini-3-flash-preview';
       let thinkingBudget = 0;
 
@@ -40,34 +45,81 @@ export class GeminiService {
         modelName = 'gemini-3-pro-preview';
       } else if (model === GeminiModel.THINKING_PRO) {
         modelName = 'gemini-3-pro-preview';
-        thinkingBudget = 1024; // Default budget for thinking mode
-      } else {
-        modelName = 'gemini-3-flash-preview';
+        thinkingBudget = 1024;
       }
 
-      // Configure the chat session
+      // Prepare tools if enabled
+      const tools = enableMcp ? mcpRegistry.getGeminiTools() : undefined;
+
+      // Initialize Chat
       const chat = this.ai.chats.create({
         model: modelName,
         history: history,
         config: {
           systemInstruction: systemInstruction,
           thinkingConfig: thinkingBudget > 0 ? { thinkingBudget } : undefined,
+          tools: tools,
         },
       });
 
-      const result = await chat.sendMessageStream({ message: prompt });
+      // Initial message
+      let currentResult = await chat.sendMessageStream({ message: prompt });
+      let finalFullText = '';
       
-      let fullText = '';
-      
-      for await (const chunk of result) {
-        const text = chunk.text;
-        if (text) {
-          fullText += text;
-          onChunk(text);
+      // Loop to handle potential multiple turns of tool usage
+      while (true) {
+        let textInTurn = '';
+        let functionCalls: any[] = [];
+
+        // Process stream
+        for await (const chunk of currentResult) {
+          // 1. Text content
+          const text = chunk.text;
+          if (text) {
+            textInTurn += text;
+            finalFullText += text;
+            onChunk(text);
+          }
+          
+          // 2. Function Calls (accumulate them, as they might be split or multiple)
+          const calls = chunk.functionCalls;
+          if (calls && calls.length > 0) {
+            functionCalls.push(...calls);
+          }
         }
+
+        // If no function calls, we are done with this turn
+        if (functionCalls.length === 0) {
+          break;
+        }
+
+        // Execute Tools
+        const functionResponses = [];
+        for (const call of functionCalls) {
+          onToolStart(call.name, call.args);
+          try {
+            const result = await mcpRegistry.executeTool(call.name, call.args);
+            functionResponses.push({
+              id: call.id,
+              name: call.name,
+              response: { result: result }
+            });
+          } catch (e: any) {
+            functionResponses.push({
+              id: call.id,
+              name: call.name,
+              response: { error: e.message } 
+            });
+          }
+        }
+
+        // Send tool results back to the model and continue the stream
+        currentResult = await chat.sendMessageStream({
+          parts: [{ functionResponse: { functionResponses } }] 
+        });
       }
 
-      return fullText;
+      return finalFullText;
 
     } catch (error: any) {
       console.error("Gemini API Error:", error);
